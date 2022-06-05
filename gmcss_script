@@ -1,0 +1,211 @@
+function Text(w, h, str = "") constructor {
+	
+	self.tb_w = w;
+	self.tb_h = h;
+	self.str = str;
+	self.str_len = string_length(str);
+	self.clean_str = "";
+	self.clean_str_len = 0;
+	self.effects = [];
+	
+	self.surf = surface_create(w, h);
+	self.shader_surf = surface_create(w, h);
+	
+	self.tw = true;
+	self.tw_delay = 10;
+	self.tw_pos = 1;
+	self.tw_timer = 0;
+	
+	self.E = {
+		color: c_white,
+		font: -1,
+		shader: -1,
+		halign: 0,
+		valign: 0,
+		move: [0,0],
+	}
+	
+	static reset_effects = function() {
+		shader_reset();
+		E.color = c_white;
+		E.font = -1;
+		E.halign = 0;
+		E.valign = 0;
+		E.move = [0,0];
+	}
+	
+	prepare();
+	
+	static prepare = function() {
+		
+		clean_str = "";
+		effects = [];
+		var pos = 1;
+		
+		for(var i = 1; i <= str_len; i++) {
+			var ch = string_char_at(str, i);
+			if ch == "{" {
+				if string_char_at(str, i-1) != "/" {
+					var eff_str = "";
+					for(var i2 = i; i2 <= str_len; i2++) {
+						var fch = string_char_at(str, i2);
+						eff_str += fch;
+						if fch == "}" break;
+					}
+					
+					var remove_eff = string_char_at(eff_str, 2) == "/";
+					var struct;
+					var ok = false;
+					
+					try {
+						struct = json_parse(jsonify(eff_str));
+						ok = true;
+					}
+					catch(e) {
+						struct = global.FORMATTING[$ string_copy(eff_str, 2, string_length(eff_str)-2)];
+						ok = struct != undefined;
+					}
+					if ok array_push(effects, { POS: pos, STRUCT: struct, KEYS: variable_struct_get_names(struct), REMOVE: remove_eff, EXTRA: {} });
+					
+					i = i2;
+					continue;
+				}
+			}
+			clean_str += ch;
+			pos++;
+		}
+		clean_str_len = string_length(clean_str);
+	}
+	
+	static jsonify = function(str) {
+		
+		var newstr = "";
+		var str2 = "";
+		var is_str = false;
+		var ch = 0;
+		
+		var l = string_length(str);
+		for(var i = 1; i <= l; i++) {
+			ch = string_ord_at(str, i);
+			if (ch >= 65 and ch <= 90) or (ch >= 97 and ch <= 122) or (ch >= 48 and ch <= 57) or ch == 95 or ch == 46 {
+				is_str = false;
+				str2 = "";
+				for(var i2 = i; i2 <= l; i2++) {
+					ch = string_ord_at(str, i2);
+					if i2 == i or (ch >= 65 and ch <= 90) or (ch >= 97 and ch <= 122) or (ch >= 48 and ch <= 57) or ch == 95 or ch == 46 {
+						str2 += chr(ch);
+						if !is_str is_str = (ch >= 65 and ch <= 90) or (ch >= 97 and ch <= 122) or ch == 95;
+					}
+					else break;
+				}
+				newstr += is_str ? "\"" + str2 + "\"" + chr(ch) : str2 + chr(ch);
+				i = i2;
+			}
+			else newstr += chr(ch);
+		}
+		return newstr;
+	}
+	
+	static draw = function(tx = 10, ty = 10) {
+		
+		if tw {
+			if tw_pos < clean_str_len and --tw_timer < 0 {
+				tw_timer = tw_delay;
+				tw_pos++;
+			}
+		}
+		else tw_pos = clean_str_len;
+		
+		var chx = tx;
+		var chy = ty;
+		for(var i = 1; i <= tw_pos; i++) {
+			get_effects(i)
+			apply_effects();
+			var ch = string_char_at(clean_str, i);
+			movedx = chx + E.move[0];
+			movedy = chy + E.move[1];
+			draw_text(movedx, movedy, ch);
+			chx += string_width(ch);
+		}
+	}
+	
+	static get_effects = function(pos) {
+		if pos == 1 reset_effects();
+		
+		for(var i = 0, el = array_length(effects); i < el; i++) {
+			var e = effects[i];
+			if e.POS == pos {
+				for(var k = 0, kl = array_length(e.KEYS); k < kl; k++) {
+					switch(e.KEYS[k]) {
+						case "color":
+							set_color(e.STRUCT.color);
+							break;
+						case "font":
+							set_font(e.STRUCT.font);
+							break;
+						case "move":
+							E.move = e.STRUCT.move;
+							break;
+						case "halign":
+							E.halign = e.STRUCT.halign;
+						case "valign":
+							E.valign = e.STRUCT.valign;
+							break;
+					}
+				}
+				break;
+			}
+		}
+	}
+	
+	static apply_effects = function() {
+		draw_set_color(E.color);
+		draw_set_font(E.font);
+		draw_set_halign(E.halign);
+		draw_set_valign(E.valign);
+		shader_set(E.shader);
+	}
+	
+	static set_color = function(arr) {
+			 if arr[0] == "RGB" E.color = rgb2c([arr[1], arr[2], arr[3]]);
+		else if arr[0] == "HSV" E.color = hsv2c([arr[1], arr[2], arr[3]]);
+		else if arr[0] == "HEX" E.color = hex2c(arr[1]);
+	}
+	
+	static set_font = function(f) {
+		if f == "none" E.font = -1;
+		else if is_string(f) E.font = asset_get_index(f);
+		else E.font = f;
+	}
+	
+	#region color stuff
+	static rgb2c = function(rgb, prem_alpha = 1) {
+		return make_color_rgb(rgb[0] * prem_alpha, rgb[1] * prem_alpha, rgb[2] * prem_alpha);
+	}
+	static hsv2c = function(hsv, prem_alpha = 1) {
+		return rgb2c(c2rgb(make_color_hsv(hsv[0], hsv[1], hsv[2])), prem_alpha);
+	}
+	static hex2c = function(hex, prem_alpha = 1) {
+		return rgb2c(c2rgb(hex2dec(hex)), prem_alpha);
+	}
+	static c2rgb = function(c) {
+		return [ (c >> 0) & 0xff, (c >> 8) & 0xff, (c >> 16) & 0xff ];
+	}
+	static hex2dec = function(hex) {
+		hex = string_upper(hex);
+		var chars = "0123456789ABCDEF";
+		var len = string_length(hex);
+		if len == 3 {
+			hex = string_char_at(hex, 1) + string_char_at(hex, 1) 
+				+ string_char_at(hex, 2) + string_char_at(hex, 2)
+				+ string_char_at(hex, 3) + string_char_at(hex, 3);
+			len = 6;
+		}
+		var dec = 0;
+		for(var pos = 1; pos <= len; pos++)
+			dec = dec << 4 | (string_pos(string_char_at(hex, pos), chars) - 1);
+		return real(dec);
+	}
+	#endregion
+}
+
